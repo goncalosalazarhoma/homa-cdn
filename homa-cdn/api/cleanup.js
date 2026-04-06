@@ -1,17 +1,16 @@
-import { del } from '@vercel/blob';
-import { kv } from '@vercel/kv';
+const { del } = require('@vercel/blob');
+const { Redis } = require('@upstash/redis');
 
-export default async function handler(req, res) {
+const redis = Redis.fromEnv();
+
+module.exports.default = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
-
-  const authHeader = req.headers['authorization'];
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (req.headers['authorization'] !== `Bearer ${process.env.CRON_SECRET}`)
     return res.status(401).json({ error: 'Unauthorized' });
-  }
 
   try {
-    const filesRaw = await kv.hgetall('homa:files');
-    if (!filesRaw) return res.status(200).json({ deleted: 0, message: 'No files found' });
+    const filesRaw = await redis.hgetall('homa:files');
+    if (!filesRaw) return res.status(200).json({ deleted: 0 });
 
     const now = Date.now();
     const expired = Object.entries(filesRaw)
@@ -19,24 +18,19 @@ export default async function handler(req, res) {
       .filter(({ meta }) => meta.expiresAt && meta.expiresAt < now);
 
     let deleted = 0;
-    for (const { url, meta } of expired) {
+    for (const { url } of expired) {
       try {
         await del(url);
-        await kv.hdel('homa:files', url);
+        await redis.hdel('homa:files', url);
         deleted++;
-        console.log(`Deleted expired file: ${meta.pathname} (expired ${new Date(meta.expiresAt).toISOString()})`);
       } catch (err) {
         console.error(`Failed to delete ${url}:`, err.message);
       }
     }
 
-    return res.status(200).json({
-      deleted,
-      checked: expired.length,
-      timestamp: new Date().toISOString(),
-    });
+    return res.status(200).json({ deleted, timestamp: new Date().toISOString() });
   } catch (err) {
     console.error('Cleanup error:', err);
     return res.status(500).json({ error: err.message });
   }
-}
+};
