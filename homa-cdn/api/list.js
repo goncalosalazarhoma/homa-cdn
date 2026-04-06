@@ -1,4 +1,5 @@
 const { Redis } = require('@upstash/redis');
+
 const redis = Redis.fromEnv();
 
 module.exports.default = async function handler(req, res) {
@@ -12,10 +13,13 @@ module.exports.default = async function handler(req, res) {
       redis.hgetall('homa:files'),
       redis.hgetall('homa:folders'),
     ]);
-    const parse = (raw) => raw ? Object.values(raw).map(v => typeof v === 'string' ? JSON.parse(v) : v) : [];
+    const parse = (raw) => raw
+      ? Object.values(raw).map(v => typeof v === 'string' ? JSON.parse(v) : v)
+      : [];
     const files = parse(filesRaw).filter(f => !f.expiresAt || f.expiresAt > Date.now());
     return res.status(200).json({ files, folders: parse(foldersRaw) });
   } catch (err) {
+    console.error('List error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
