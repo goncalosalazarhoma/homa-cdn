@@ -1,34 +1,21 @@
-import { kv } from '@vercel/kv';
+const { Redis } = require('@upstash/redis');
+const redis = Redis.fromEnv();
 
-export default async function handler(req, res) {
+module.exports.default = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-
-  const authHeader = req.headers['authorization'];
-  if (authHeader !== `Bearer ${process.env.HOMA_CDN_SECRET}`) {
+  if (req.headers['authorization'] !== `Bearer ${process.env.HOMA_CDN_SECRET}`)
     return res.status(401).json({ error: 'Unauthorized' });
-  }
 
   try {
     const [filesRaw, foldersRaw] = await Promise.all([
-      kv.hgetall('homa:files'),
-      kv.hgetall('homa:folders'),
+      redis.hgetall('homa:files'),
+      redis.hgetall('homa:folders'),
     ]);
-
-    const files = filesRaw
-      ? Object.values(filesRaw).map((v) => (typeof v === 'string' ? JSON.parse(v) : v))
-      : [];
-
-    const folders = foldersRaw
-      ? Object.values(foldersRaw).map((v) => (typeof v === 'string' ? JSON.parse(v) : v))
-      : [];
-
-    const now = Date.now();
-    const activeFiles = files.filter((f) => !f.expiresAt || f.expiresAt > now);
-
-    return res.status(200).json({ files: activeFiles, folders });
+    const parse = (raw) => raw ? Object.values(raw).map(v => typeof v === 'string' ? JSON.parse(v) : v) : [];
+    const files = parse(filesRaw).filter(f => !f.expiresAt || f.expiresAt > Date.now());
+    return res.status(200).json({ files, folders: parse(foldersRaw) });
   } catch (err) {
-    console.error('List error:', err);
     return res.status(500).json({ error: err.message });
   }
-}
+};
